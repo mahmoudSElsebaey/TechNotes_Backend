@@ -1,0 +1,16 @@
+body {
+  background-color: black;
+  font-family: sans-serif;
+}
+div {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+p {
+  color: #fff;
+  font-size: 65px;
+  letter-spacing: 3px;
+}
+ 
