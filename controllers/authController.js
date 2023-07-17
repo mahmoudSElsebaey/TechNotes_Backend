@@ -1,71 +1,169 @@
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
-const asyncHandler = require("express-async-handler");
 const User = require("../models/User");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const asyncHandler = require("express-async-handler");
 
-const generateToken = (user) => {
-  const payload = {
-    userId: user._id,
-    username: user.username,
-    roles: user.roles,
-  };
-
-  return jwt.sign(payload, "secret_key");
-};
-
-// Login
 const login = asyncHandler(async (req, res) => {
   const { username, password } = req.body;
-
-  const user = await User.findOne({ username }).exec();
-
-  if (!user) {
-    return res.status(400).json({ message: "Invalid username or password" });
+  if (!username || !password) {
+    return res.status(400).json({ message: "All fields are required" });
   }
 
-  const isPasswordValid = await bcrypt.compare(password, user.password);
+  const foundUser = await User.findOne({ username }).exec();
 
-  if (!isPasswordValid) {
-    return res.status(400).json({ message: "Invalid username or password" });
+  if (!foundUser || !foundUser.active) {
+    return res.status(401).json({ message: "Unauthorized" });
   }
 
-  const token = generateToken(user);
+  const match = await bcrypt.compare(password, foundUser.password);
 
-  res.json({ token });
+  if (!match) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  const accessToken = jwt.sign(
+    {
+      UserInfo: {
+        username: foundUser.username,
+        roles: foundUser.roles,
+      },
+    },
+    process.env.ACCESS_TOKEN_SECRET,
+    { expiresIn: "15m" }
+  );
+
+  const refreshToken = jwt.sign(
+    { username: foundUser.username },
+    process.env.REFRESH_TOKEN_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  res.cookie("jwt", refreshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "None",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  res.json({ accessToken });
 });
 
-// Refresh
-const refresh = asyncHandler(async (req, res) => {
-  const { token } = req.body;
+const refresh = (req, res) => {
+  const cookies = req.cookies;
 
-  if (!token) {
-    return res.status(400).json({ message: "No token provided" });
-  }
+  if (!cookies?.jwt) return res.status(401).json({ message: "Unauthorized" });
 
-  try {
-    const decoded = jwt.verify(token, "secret_key");
+  const refreshToken = cookies.jwt;
 
-    const user = await User.findById(decoded.userId).exec();
+  jwt.verify(
+    refreshToken,
+    process.env.REFRESH_TOKEN_SECRET,
+    asyncHandler(async (err, decoded) => {
+      if (err) return res.status(403).json({ message: "Forbidden" });
 
-    if (!user) {
-      return res.status(400).json({ message: "Invalid token" });
-    }
+      const foundUser = await User.findOne({
+        username: decoded.username,
+      }).exec();
 
-    const newToken = generateToken(user);
+      if (!foundUser) return res.status(401).json({ message: "Unauthorized" });
 
-    res.json({ token: newToken });
-  } catch (error) {
-    return res.status(400).json({ message: "Invalid token" });
-  }
-});
+      const accessToken = jwt.sign(
+        {
+          UserInfo: {
+            username: foundUser.username,
+            roles: foundUser.roles,
+          },
+        },
+        process.env.ACCESS_TOKEN_SECRET,
+        { expiresIn: "15m" }
+      );
 
-// Logout
-const logout = asyncHandler(async (req, res) => {
-  res.json({ message: "Logged out successfully" });
-});
+      res.json({ accessToken });
+    })
+  );
+};
+
+const logout = (req, res) => {
+  const cookies = req.cookies;
+  if (!cookies?.jwt) return res.sendStatus(204);
+  res.clearCookie("jwt", { httpOnly: true, sameSite: "None", secure: true });
+  res.json({ message: "Cookie cleared" });
+};
 
 module.exports = {
   login,
   refresh,
   logout,
 };
+
+// const jwt = require("jsonwebtoken");
+// const bcrypt = require("bcrypt");
+// const asyncHandler = require("express-async-handler");
+// const User = require("../models/User");
+
+// const generateToken = (user) => {
+//   const payload = {
+//     userId: user._id,
+//     username: user.username,
+//     roles: user.roles,
+//   };
+
+//   return jwt.sign(payload, "secret_key");
+// };
+
+// // Login
+// const login = asyncHandler(async (req, res) => {
+//   const { username, password } = req.body;
+
+//   const user = await User.findOne({ username }).exec();
+
+//   if (!user) {
+//     return res.status(400).json({ message: "Invalid username or password" });
+//   }
+
+//   const isPasswordValid = await bcrypt.compare(password, user.password);
+
+//   if (!isPasswordValid) {
+//     return res.status(400).json({ message: "Invalid username or password" });
+//   }
+
+//   const token = generateToken(user);
+
+//   res.json({ token });
+// });
+
+// // Refresh
+// const refresh = asyncHandler(async (req, res) => {
+//   const { token } = req.body;
+
+//   if (!token) {
+//     return res.status(400).json({ message: "No token provided" });
+//   }
+
+//   try {
+//     const decoded = jwt.verify(token, "secret_key");
+
+//     const user = await User.findById(decoded.userId).exec();
+
+//     if (!user) {
+//       return res.status(400).json({ message: "Invalid token" });
+//     }
+
+//     const newToken = generateToken(user);
+
+//     res.json({ token: newToken });
+//   } catch (error) {
+//     return res.status(400).json({ message: "Invalid token" });
+//   }
+// });
+
+// // Logout
+// const logout = asyncHandler(async (req, res) => {
+//   res.json({ message: "Logged out successfully" });
+// });
+
+// module.exports = {
+//   login,
+//   refresh,
+//   logout,
+// };
